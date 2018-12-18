@@ -1,0 +1,385 @@
+还原教学环境介绍，保证classroom虚拟机优先开机
+真机使用rht-vmctl辅助工具                 
+– 常用控制指令:    reset(还原)
+  ]# rht-vmctl reset classroom   //先重置资源服务器
+  ]# rht-vmctl reset server
+  ]# rht-vmctl reset desktop 
+
+[root@server0 ~]# rm -rf /etc/yum.repos.d/*
+[root@server0 ~]# vim /etc/yum.repos.d/dvd.repo
+[haha]
+name=xixi
+baseurl=http://classroom.example.com/content/rhel7.0/x86_64/dvd/
+enabled=1
+gpgcheck=0
+[root@server0 ~]# yum repolist 
+[root@server0 ~]# yum -y  install httpd
+
+######################################################
+分区规划及使用
+
+扇区默认的大小为512字节
+
+一块硬盘的“艺术”之旅
+• 识别硬盘 => 分区规划 => 格式化 => 挂载使用
+   毛坯楼层 =>打隔断 =>装修 =>入驻
+
+一  识别硬盘
+[root@server0 ~]# lsblk
+ NAME   MAJ:MIN RM SIZE RO TYPE MOUNTPOINT
+ vda    253:0    0  10G  0 disk 
+ └─vda1 253:1    0  10G  0 part /
+ vdb    253:16   0  10G  0 disk 
+[root@server0 ~]# ls /dev/vdb
+
+   vd:虚拟化硬盘
+
+二  分区规划
+
+      分区模式:  
+    MBR 主引导记录模式  
+              最大支持的空间2.2Tb  
+              分区类型:主分区   扩展分区  逻辑分区
+              1~4个主分区,或者 3个主分区+1个扩展分区(n个逻辑分区)
+              扩展分区不能格式化,不能存储数据
+
+使用交互式fdisk分区工具
+  
+[root@server0 ~]# fdisk  /dev/vdb 
+  n 创建新的分区----->回车----->回车---->回车----->在last结束时 +2G
+  p 查看分区表
+  n 创建新的分区----->回车----->回车---->回车----->在last结束时 +1G
+  d 删除分区
+  w 保存并退出    
+
+[root@server0 ~]# lsblk
+[root@server0 ~]# ls  /dev/vdb[1-2]
+
+三  格式化文件系统(存储的数据的规则)
+
+• mkfs 工具集
+– mkfs.ext3 分区设备路径
+– mkfs.ext4 分区设备路径
+– mkfs.xfs 分区设备路径
+– mkfs.vfat -F 32 分区设备路径
+
+[root@server0 ~]# mkfs.ext4 /dev/vdb1  #格式化文件系统为ext4
+[root@server0 ~]# blkid /dev/vdb1      #查看文件系统类型
+
+[root@server0 ~]# mkfs.xfs /dev/vdb2
+[root@server0 ~]# blkid /dev/vdb2
+
+[root@server0 ~]# mkfs.xfs /dev/vdb2
+mkfs.xfs: /dev/vdb2 appears to contain an existing filesystem (ext4).
+mkfs.xfs: Use the -f option to force overwrite.
+[root@server0 ~]# mkfs.xfs -f /dev/vdb2  #强制格式化
+
+四   挂载使用
+[root@server0 ~]# mkdir /mypart1
+[root@server0 ~]# mount /dev/vdb1  /mypart1
+[root@server0 ~]# df  -h  #显示正在挂载设备的使用情况
+
+[root@server0 ~]# mount /dev/vdb2 /mypart2
+mount: 挂载点 /mypart2 不存在
+[root@server0 ~]# mount /dev/vdb1  /mypart1
+[root@server0 ~]# df -h | tail -2
+
+五  开机自动挂载设备
+• 配置文件 /etc/fstab 的记录格式
+– 设备路径      挂载点        类型      参数          备份标记      检测顺序
+  
+补充vim技巧:命令模式进入插入模式   按 o 可以另起一行进入插入模式
+
+[root@server0 ~]# vim  /etc/fstab
+......
+/dev/vdb1  /mypart1   ext4  defaults   0  0
+/dev/vdb2  /mypart2   xfs   defaults   0  0
+
+[root@server0 ~]# umount  /mypart1
+[root@server0 ~]# umount  /mypart2
+[root@server0 ~]# df -h
+[root@server0 ~]# mount -a 
+   检测/etc/fstab开机自动挂载配置文件,格式是否正确
+   检测/etc/fstab中,书写完成,但当前没有挂载的设备,进行挂载 
+[root@server0 ~]# df -h
+
+六  综合分区
+   最终有3个主分区，分别为2G、1G、2G
+   创建扩展分区 --->  两个逻辑分区，分别为1G、1G
+[root@server0 ~]# fdisk  /dev/vdb
+   p 查看分区表
+   n 创建主分区----->回车----->回车---->回车----->在last结束时 +2G
+   p 查看分区表
+   n 创建扩展分区 
+          ----->回车---->起始回车----->结束回车  将所有空间给扩展分区
+   p 查看分区表
+   n 创建逻辑分区----->起始回车------>结束+1G
+   n 创建逻辑分区----->起始回车------>结束+1G
+   p 查看分区表
+   w 保存并退出
+[root@server0 ~]# lsblk 
+[root@server0 ~]# partprobe   #刷新  分区表信息 识别新的分区
+[root@server0 ~]# lsblk 
+
+######################################################
+总结:
+    1.查看本机硬盘设备    lsblk
+    2.划分新的分区         fdisk
+    3.刷新 新的分区表     partprobe
+    4.格式化文件系统      mkfs.ext4   mkfs.xfs  blkid
+    5.挂载使用      手工挂载mount   开机自动挂载/etc/fstab
+
+######################################################
+新添加一块80G分区:
+
+1.关闭虚拟机server
+[root@server0 ~]# poweroff 
+Connection to 172.25.0.11 closed by remote host.
+Connection to 172.25.0.11 closed.
+[root@room9pc01 ~]# 
+
+2.利用图形添加80G硬盘
+[root@room9pc01 ~]# gos
+[root@server0 ~]# lsblk 
+[root@server0 ~]# ls /dev/vdc
+
+综合分区:
+    划分3个主分区,分别为10G
+    划分扩展分区,在扩展分区之上,划分2个10G的逻辑分区
+[root@server0 ~]# fdisk  /dev/vdc  
+   p 查看分区表
+   n 创建主分区----->回车----->回车---->回车----->在last结束时 +10G
+         连续创建3个10G主分区
+      ......
+   n 创建扩展分区 
+               ----->回车---->起始回车----->结束回车  将所有空间给扩展分区
+   p 查看分区表
+   n 创建逻辑分区----->起始回车------>结束+10G
+   n 创建逻辑分区----->起始回车------>结束+10G
+   p 查看分区表
+   w 保存并退出
+[root@server0 ~]# lsblk 
+
+    /dev/sda5表示的含义?
+         第一块SCSI设备,第五个分区
+         第一块SCSI设备,第一个逻辑分区
+
+######################################################
+LVM逻辑卷
+      作用:   1.整合分散的空间     2.空间可以按照需求扩大
+
+
+– 零散空闲存储 ---- 整合的虚拟磁盘 ---- 虚拟的分区
+   物理卷 Physical Volume (PV)
+   卷组 Volume Group (VG)
+   逻辑卷 Logical Volume (LV)
+
+ 将众多的物理卷(PV),组建成卷组(VG),从卷组中划分出逻辑卷(LV)
+
+
+一  创建逻辑卷
+successfully(成功)
+
+1.创建卷组
+   命令格式: vgcreate  卷组名    设备路径......
+
+[root@server0 ~]# vgcreate  systemvg  /dev/vdc[1-2]
+[root@server0 ~]# vgs    #查看卷组信息
+[root@server0 ~]# pvs    #查看物理卷信息
+
+2.创建逻辑卷
+     命令格式:lvcreate -L 大小  -n 逻辑卷名称   基于的卷组
+[root@server0 ~]# lvcreate -L 16G  -n  vo systemvg 
+  Logical volume "vo" created
+[root@server0 ~]# lvs    #查看逻辑卷信息
+[root@server0 ~]# vgs    #查看卷组信息  
+
+3.使用逻辑卷                                                         
+[root@server0 ~]# ls /dev/systemvg/vo 
+[root@server0 ~]# ls -l /dev/systemvg/vo
+[root@server0 ~]# mkfs.xfs /dev/systemvg/vo
+[root@server0 ~]# blkid /dev/systemvg/vo
+
+[root@server0 ~]# vim /etc/fstab 
+/dev/systemvg/vo   /mylv   xfs  defaults  0  0
+[root@server0 ~]# mount -a
+mount: 挂载点 /mylv 不存在
+[root@server0 ~]# mkdir /mylv
+[root@server0 ~]# mount -a
+[root@server0 ~]# df -h
+
+
+二  逻辑卷的扩展
+
+ 1.卷组有足够的剩余空间
+  A:扩展逻辑卷的空间
+    [root@server0 ~]# lvs
+    [root@server0 ~]# vgs
+    [root@server0 ~]# lvextend -L 18G /dev/systemvg/vo 
+    [root@server0 ~]# lvs
+    [root@server0 ~]# df -h
+  B:扩展文件系统
+     resize2fs:扩展ext4文件系统
+     xfs_growfs:扩展xfs文件系统
+    [root@server0 ~]# df -h
+    [root@server0 ~]# xfs_growfs /dev/systemvg/vo
+    [root@server0 ~]# df -h
+
+ 2.卷组没有足够的剩余空间
+    A:扩展卷组
+    [root@server0 ~]# vgextend  systemvg  /dev/vdc3
+      Physical volume "/dev/vdc3" successfully created
+      Volume group "systemvg" successfully extended
+    [root@server0 ~]# vgs
+    B:扩展逻辑卷的空间
+    [root@server0 ~]# lvs
+    [root@server0 ~]# lvextend -L 25G /dev/systemvg/vo 
+    [root@server0 ~]# lvs
+    [root@server0 ~]# df -h
+    C:扩展文件系统
+    [root@server0 ~]# df -h
+    [root@server0 ~]# xfs_growfs /dev/systemvg/vo
+    [root@server0 ~]# df -h
+######################################################
+了解内容:
+      逻辑卷空间可以进行缩小
+      ext4文件系统支持缩小
+      xfs文件系统不支持缩小
+
+###################################################
+卷组划分空间的单位:  默认4M  称为 PE
+
+[root@server0 ~]# vgdisplay systemvg  #显示卷组详细信息
+  PE Size               4.00 MiB
+
+
+• 创建卷组的时候设置PE大小
+– vgcreate -s PE大小  卷组名  空闲分区...
+• 修改卷组的时候设置PE大小
+– vgchange -s PE大小  卷组名  空闲分区...
+
+  请创建一个逻辑卷为lvtest01 ,大小为250M
+[root@server0 ~]# vgchange -s 1M systemvg 
+  Volume group "systemvg" successfully changed
+
+[root@server0 ~]# lvcreate -L 250M -n lvtest02 systemvg 
+  Logical volume "lvtest02" created
+
+[root@server0 ~]# lvs
+
+
+
+基于刚建立的 2000MiB 分区构建新的 LVM 存储
+– 新的逻辑卷命名为 database,大小为50个物理扩展单
+元(Physical Extent),属于 datastore 卷组
+– 在 datastore 卷组中的所有逻辑卷,其物理扩展单元
+(Physical Extent)的大小为16MiB
+– 使用 EXT3 文件系统对逻辑卷 database 格式化,此逻
+辑卷应该在开机时自动挂载到 /mnt/database 目录
+
+[root@server0 ~]# vgcreate -s  16M   datastore   /dev/sdd1
+[root@server0 ~]# vgdisplay  datastore   #显示卷组详细信息
+  PE Size               16.00 MiB
+
+[root@server0 ~]# lvcreate -l 50  -n  database  datastore
+#######################################################
+了解:逻辑卷删除
+   
+  删除的顺序: 
+       首先删除逻辑卷,在删除卷组,最后删除物理卷(可以不删除物理卷)
+
+1.先卸载逻辑卷
+[root@server0 ~]# lvremove /dev/systemvg/vo 
+  Logical volume systemvg/vo contains a filesystem in use.
+[root@server0 ~]# umount /mylv/
+[root@server0 ~]# lvremove /dev/systemvg/vo 
+Do you really want to remove active logical volume vo? [y/n]: y
+  Logical volume "vo" successfully removed
+[root@server0 ~]# lvs
+[root@server0 ~]# lvremove /dev/systemvg/lvtest01
+Do you really want to remove active logical volume lvtest01? [y/n]: y
+  Logical volume "lvtest01" successfully removed
+[root@server0 ~]# lvremove /dev/systemvg/lvtest02
+Do you really want to remove active logical volume lvtest02? [y/n]: y
+  Logical volume "lvtest02" successfully removed
+[root@server0 ~]# lvs
+
+2.删除卷组(没有任何一个逻辑卷,基于此卷组创建)
+[root@server0 ~]# vgs
+[root@server0 ~]# vgremove systemvg 
+  Volume group "systemvg" successfully removed
+[root@server0 ~]# vgs
+  No volume groups found
+[root@server0 ~]# 
+
+#####################################################
+
+
+
+
+
+
+
+
+
+
+
+   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
